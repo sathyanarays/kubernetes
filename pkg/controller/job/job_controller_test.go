@@ -209,6 +209,8 @@ func TestControllerSyncJob(t *testing.T) {
 
 		// If set, it means that the case is exclusive to tracking with/without finalizers.
 		wFinalizersExclusive *bool
+		// If set, it sets job status counters to the expected values
+		statusCountersUpToDate bool
 
 		// pod setup
 		podControllerError        error
@@ -244,7 +246,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:       2,
 			completions:       5,
 			backoffLimit:      6,
-			jobKeyForget:      true,
+			jobKeyForget:      false,
 			expectedCreations: 2,
 			expectedActive:    2,
 		},
@@ -252,7 +254,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:       2,
 			completions:       -1,
 			backoffLimit:      6,
-			jobKeyForget:      true,
+			jobKeyForget:      false,
 			expectedCreations: 2,
 			expectedActive:    2,
 		},
@@ -260,7 +262,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:    2,
 			completions:    5,
 			backoffLimit:   6,
-			jobKeyForget:   true,
+			jobKeyForget:   false,
 			pendingPods:    2,
 			expectedActive: 2,
 		},
@@ -268,7 +270,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:    3,
 			completions:    5,
 			backoffLimit:   6,
-			jobKeyForget:   true,
+			jobKeyForget:   false,
 			activePods:     3,
 			readyPods:      2,
 			expectedActive: 3,
@@ -277,7 +279,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:         3,
 			completions:         5,
 			backoffLimit:        6,
-			jobKeyForget:        true,
+			jobKeyForget:        false,
 			activePods:          3,
 			readyPods:           2,
 			expectedActive:      3,
@@ -288,7 +290,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:    2,
 			completions:    -1,
 			backoffLimit:   6,
-			jobKeyForget:   true,
+			jobKeyForget:   false,
 			activePods:     2,
 			expectedActive: 2,
 		},
@@ -308,7 +310,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:       2,
 			completions:       -1,
 			backoffLimit:      6,
-			jobKeyForget:      true,
+			jobKeyForget:      false,
 			activePods:        1,
 			expectedCreations: 1,
 			expectedActive:    2,
@@ -329,7 +331,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:        2,
 			completions:        5,
 			backoffLimit:       6,
-			jobKeyForget:       true,
+			jobKeyForget:       false,
 			activePods:         3,
 			expectedDeletions:  1,
 			expectedActive:     2,
@@ -340,7 +342,7 @@ func TestControllerSyncJob(t *testing.T) {
 			completions:        5,
 			backoffLimit:       6,
 			podControllerError: fmt.Errorf("fake error"),
-			jobKeyForget:       true,
+			jobKeyForget:       false,
 			activePods:         3,
 			expectedDeletions:  1,
 			expectedActive:     3,
@@ -369,6 +371,19 @@ func TestControllerSyncJob(t *testing.T) {
 			expectedActive:     2,
 			expectedFailed:     1,
 			expectedPodPatches: 1,
+		},
+		"no new pod; possible finalizer update of failed pod": {
+			wFinalizersExclusive:   pointer.Bool(true),
+			statusCountersUpToDate: true,
+			parallelism:            1,
+			completions:            1,
+			backoffLimit:           6,
+			activePods:             1,
+			failedPods:             0,
+			expectedCreations:      0,
+			expectedActive:         1,
+			expectedFailed:         1,
+			expectedPodPatches:     0,
 		},
 		"only new failed pod with controller error": {
 			parallelism:        2,
@@ -431,7 +446,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:        2,
 			completions:        5,
 			backoffLimit:       6,
-			jobKeyForget:       true,
+			jobKeyForget:       false,
 			activePods:         10,
 			expectedDeletions:  8,
 			expectedActive:     2,
@@ -478,7 +493,7 @@ func TestControllerSyncJob(t *testing.T) {
 			completions:       200,
 			backoffLimit:      6,
 			podLimit:          10,
-			jobKeyForget:      true,
+			jobKeyForget:      false,
 			expectedCreations: 10,
 			expectedActive:    10,
 		},
@@ -486,7 +501,7 @@ func TestControllerSyncJob(t *testing.T) {
 			parallelism:             2,
 			completions:             5,
 			deleting:                true,
-			jobKeyForget:            true,
+			jobKeyForget:            false,
 			failedPods:              1,
 			expectedFailed:          1,
 			expectedCondition:       &jobConditionFailed,
@@ -509,7 +524,7 @@ func TestControllerSyncJob(t *testing.T) {
 			completions:            5,
 			backoffLimit:           6,
 			completionMode:         batch.IndexedCompletion,
-			jobKeyForget:           true,
+			jobKeyForget:           false,
 			expectedCreations:      2,
 			expectedActive:         2,
 			expectedCreatedIndexes: sets.NewInt(0, 1),
@@ -686,7 +701,7 @@ func TestControllerSyncJob(t *testing.T) {
 			fakeExpectationAtCreation: -1, // the controller is expecting a deletion
 			completions:               4,
 			backoffLimit:              6,
-			jobKeyForget:              true,
+			jobKeyForget:              false,
 			expectedCreations:         0,
 			expectedDeletions:         0,
 			expectedActive:            3,
@@ -716,7 +731,7 @@ func TestControllerSyncJob(t *testing.T) {
 			activePods:         2, // parallelism == active, expectations satisfied
 			completions:        4,
 			backoffLimit:       6,
-			jobKeyForget:       true,
+			jobKeyForget:       false,
 			expectedCreations:  0,
 			expectedDeletions:  0,
 			expectedActive:     2,
@@ -746,6 +761,14 @@ func TestControllerSyncJob(t *testing.T) {
 				// job & pods setup
 				job := newJob(tc.parallelism, tc.completions, tc.backoffLimit, tc.completionMode)
 				job.Spec.Suspend = pointer.Bool(tc.suspend)
+				if tc.statusCountersUpToDate {
+					job.Status.Failed = tc.expectedFailed
+					startTime := metav1.Now()
+					job.Status.StartTime = &startTime
+					job.Status.Active = tc.expectedActive
+					job.Status.Succeeded = tc.expectedSucceeded
+				}
+
 				key, err := controller.KeyFunc(job)
 				if err != nil {
 					t.Errorf("Unexpected error getting job key: %v", err)
@@ -1695,7 +1718,7 @@ func TestSyncJobPastDeadline(t *testing.T) {
 			startTime:               15,
 			backoffLimit:            6,
 			activePods:              1,
-			expectedForGetKey:       true,
+			expectedForGetKey:       false,
 			expectedDeletions:       1,
 			expectedFailed:          1,
 			expectedCondition:       batch.JobFailed,
@@ -1722,7 +1745,7 @@ func TestSyncJobPastDeadline(t *testing.T) {
 			activeDeadlineSeconds:   10,
 			startTime:               10,
 			backoffLimit:            6,
-			expectedForGetKey:       true,
+			expectedForGetKey:       false,
 			expectedCondition:       batch.JobFailed,
 			expectedConditionReason: "DeadlineExceeded",
 		},
@@ -1732,7 +1755,7 @@ func TestSyncJobPastDeadline(t *testing.T) {
 			activeDeadlineSeconds:   1,
 			startTime:               10,
 			failedPods:              1,
-			expectedForGetKey:       true,
+			expectedForGetKey:       false,
 			expectedFailed:          1,
 			expectedCondition:       batch.JobFailed,
 			expectedConditionReason: "BackoffLimitExceeded",
@@ -1934,8 +1957,8 @@ func TestSingleJobFailedCondition(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error when syncing jobs %v", err)
 	}
-	if !forget {
-		t.Errorf("Unexpected forget value. Expected %v, saw %v\n", true, forget)
+	if forget {
+		t.Errorf("Unexpected forget value. Expected %v, saw %v\n", false, forget)
 	}
 	if len(fakePodControl.DeletePodName) != 0 {
 		t.Errorf("Unexpected number of deletes.  Expected %d, saw %d\n", 0, len(fakePodControl.DeletePodName))
@@ -3922,15 +3945,16 @@ func (f *fakeRateLimitingQueue) AddAfter(item interface{}, duration time.Duratio
 }
 
 func TestJobBackoff(t *testing.T) {
+	DefaultJobBackOff = 10 * time.Second
 	job := newJob(1, 1, 1, batch.NonIndexedCompletion)
 	oldPod := newPod(fmt.Sprintf("pod-%v", rand.String(10)), job)
-	oldPod.Status.Phase = v1.PodRunning
 	oldPod.ResourceVersion = "1"
 	newPod := oldPod.DeepCopy()
 	newPod.ResourceVersion = "2"
 
 	testCases := map[string]struct {
 		requeues            int
+		oldPodPhase         v1.PodPhase
 		phase               v1.PodPhase
 		jobReadyPodsEnabled bool
 		wantBackoff         time.Duration
@@ -3971,14 +3995,22 @@ func TestJobBackoff(t *testing.T) {
 			wantBackoff: 0,
 		},
 		"1st failure with pod updates batching": {
-			requeues:    0,
-			phase:       v1.PodFailed,
-			wantBackoff: podUpdateBatchPeriod,
+			requeues:            0,
+			phase:               v1.PodFailed,
+			jobReadyPodsEnabled: true,
+			wantBackoff:         podUpdateBatchPeriod,
 		},
 		"2nd failure with pod updates batching": {
+			requeues:            1,
+			phase:               v1.PodFailed,
+			jobReadyPodsEnabled: true,
+			wantBackoff:         DefaultJobBackOff,
+		},
+		"Failed pod observed again": {
 			requeues:    1,
+			oldPodPhase: v1.PodFailed,
 			phase:       v1.PodFailed,
-			wantBackoff: DefaultJobBackOff,
+			wantBackoff: 0,
 		},
 	}
 
@@ -3997,10 +4029,13 @@ func TestJobBackoff(t *testing.T) {
 
 			queue.requeues = tc.requeues
 			newPod.Status.Phase = tc.phase
+			oldPod.Status.Phase = v1.PodRunning
+			if tc.oldPodPhase != "" {
+				oldPod.Status.Phase = tc.oldPodPhase
+			}
 			manager.updatePod(oldPod, newPod)
-
-			if queue.duration.Nanoseconds() != int64(tc.wantBackoff)*DefaultJobBackOff.Nanoseconds() {
-				t.Errorf("unexpected backoff %v", queue.duration)
+			if queue.duration != tc.wantBackoff {
+				t.Errorf("unexpected backoff %v, expected %v", queue.duration, tc.wantBackoff)
 			}
 		})
 	}
@@ -4029,47 +4064,47 @@ func TestJobBackoffForOnFailure(t *testing.T) {
 	}{
 		"backoffLimit 0 should have 1 pod active": {
 			1, 1, 0,
-			true, []int32{0}, v1.PodRunning,
+			false, []int32{0}, v1.PodRunning,
 			1, 0, 0, nil, "",
 		},
 		"backoffLimit 1 with restartCount 0 should have 1 pod active": {
 			1, 1, 1,
-			true, []int32{0}, v1.PodRunning,
+			false, []int32{0}, v1.PodRunning,
 			1, 0, 0, nil, "",
 		},
 		"backoffLimit 1 with restartCount 1 and podRunning should have 0 pod active": {
 			1, 1, 1,
-			true, []int32{1}, v1.PodRunning,
+			false, []int32{1}, v1.PodRunning,
 			0, 0, 1, &jobConditionFailed, "BackoffLimitExceeded",
 		},
 		"backoffLimit 1 with restartCount 1 and podPending should have 0 pod active": {
 			1, 1, 1,
-			true, []int32{1}, v1.PodPending,
+			false, []int32{1}, v1.PodPending,
 			0, 0, 1, &jobConditionFailed, "BackoffLimitExceeded",
 		},
 		"too many job failures with podRunning - single pod": {
 			1, 5, 2,
-			true, []int32{2}, v1.PodRunning,
+			false, []int32{2}, v1.PodRunning,
 			0, 0, 1, &jobConditionFailed, "BackoffLimitExceeded",
 		},
 		"too many job failures with podPending - single pod": {
 			1, 5, 2,
-			true, []int32{2}, v1.PodPending,
+			false, []int32{2}, v1.PodPending,
 			0, 0, 1, &jobConditionFailed, "BackoffLimitExceeded",
 		},
 		"too many job failures with podRunning - multiple pods": {
 			2, 5, 2,
-			true, []int32{1, 1}, v1.PodRunning,
+			false, []int32{1, 1}, v1.PodRunning,
 			0, 0, 2, &jobConditionFailed, "BackoffLimitExceeded",
 		},
 		"too many job failures with podPending - multiple pods": {
 			2, 5, 2,
-			true, []int32{1, 1}, v1.PodPending,
+			false, []int32{1, 1}, v1.PodPending,
 			0, 0, 2, &jobConditionFailed, "BackoffLimitExceeded",
 		},
 		"not enough failures": {
 			2, 5, 3,
-			true, []int32{1, 1}, v1.PodRunning,
+			false, []int32{1, 1}, v1.PodRunning,
 			2, 0, 0, nil, "",
 		},
 	}
@@ -4152,7 +4187,7 @@ func TestJobBackoffOnRestartPolicyNever(t *testing.T) {
 		"not enough failures with backoffLimit 0 - single pod": {
 			1, 1, 0,
 			v1.PodRunning, 1, 0,
-			false, true, 1, 0, 0, nil, "",
+			false, false, 1, 0, 0, nil, "",
 		},
 		"not enough failures with backoffLimit 1 - single pod": {
 			1, 1, 1,
@@ -4162,7 +4197,7 @@ func TestJobBackoffOnRestartPolicyNever(t *testing.T) {
 		"too many failures with backoffLimit 1 - single pod": {
 			1, 1, 1,
 			"", 0, 2,
-			false, true, 0, 0, 2, &jobConditionFailed, "BackoffLimitExceeded",
+			false, false, 0, 0, 2, &jobConditionFailed, "BackoffLimitExceeded",
 		},
 		"not enough failures with backoffLimit 6 - multiple pods": {
 			2, 2, 6,
@@ -4172,7 +4207,7 @@ func TestJobBackoffOnRestartPolicyNever(t *testing.T) {
 		"too many failures with backoffLimit 6 - multiple pods": {
 			2, 2, 6,
 			"", 0, 7,
-			false, true, 0, 0, 7, &jobConditionFailed, "BackoffLimitExceeded",
+			false, false, 0, 0, 7, &jobConditionFailed, "BackoffLimitExceeded",
 		},
 	}
 

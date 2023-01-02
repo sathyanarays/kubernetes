@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1204,6 +1205,87 @@ func TestFinalizersClearedWhenBackoffLimitExceeded(t *testing.T) {
 	validateNoOrphanPodsWithFinalizers(ctx, t, clientSet, jobObj)
 }
 
+func TestJobPodsCreatedWithExponentialBackoff(t *testing.T) {
+	// overwrite the default value for faster testing
+	defer func() { jobcontroller.DefaultJobBackOff = 10 * time.Second }()
+	jobcontroller.DefaultJobBackOff = 2 * time.Second
+
+	closeFn, restConfig, clientSet, ns := setup(t, "simple")
+	defer closeFn()
+	ctx, cancel := startJobControllerAndWaitForCaches(restConfig)
+	defer cancel()
+
+	jobObj, err := createJobWithDefaults(ctx, clientSet, ns.Name, &batchv1.Job{})
+	if err != nil {
+		t.Fatalf("Could not create job: %v", err)
+	}
+	if !hasJobTrackingAnnotation(jobObj) {
+		t.Error("apiserver didn't add the tracking annotation")
+	}
+	validateJobPodsStatus(ctx, t, clientSet, jobObj, podsByStatus{
+		Active: 1,
+		Ready:  pointer.Int32(0),
+	})
+
+	// Fail the first pod
+	if err, _ := setJobPodsPhase(ctx, clientSet, jobObj, v1.PodFailed, 1); err != nil {
+		t.Fatalf("Failed setting phase %s on Job Pod: %v", v1.PodFailed, err)
+	}
+	validateJobPodsStatus(ctx, t, clientSet, jobObj, podsByStatus{
+		Active: 1,
+		Ready:  pointer.Int32(0),
+		Failed: 1,
+	})
+
+	// Fail the second pod
+	if err, _ := setJobPodsPhase(ctx, clientSet, jobObj, v1.PodFailed, 1); err != nil {
+		t.Fatalf("Failed setting phase %s on Job Pod: %v", v1.PodFailed, err)
+	}
+	validateJobPodsStatus(ctx, t, clientSet, jobObj, podsByStatus{
+		Active: 1,
+		Ready:  pointer.Int32(0),
+		Failed: 2,
+	})
+
+	// Fail the third pod
+	if err, _ := setJobPodsPhase(ctx, clientSet, jobObj, v1.PodFailed, 1); err != nil {
+		t.Fatalf("Failed setting phase %s on Job Pod: %v", v1.PodFailed, err)
+	}
+	validateJobPodsStatus(ctx, t, clientSet, jobObj, podsByStatus{
+		Active: 1,
+		Ready:  pointer.Int32(0),
+		Failed: 3,
+	})
+
+	jobPods, err := getAllJobPods(ctx, t, clientSet, jobObj)
+	if err != nil {
+		t.Fatalf("Failed to list Job Pods: %v", err)
+	}
+	if len(jobPods) != 4 {
+		t.Fatalf("Expected to get %v pods, received %v", 4, len(jobPods))
+	}
+
+	creationTime := []time.Time{}
+	for _, pod := range jobPods {
+		creationTime = append(creationTime, pod.CreationTimestamp.Time)
+	}
+
+	sort.Slice(creationTime, func(i, j int) bool {
+		return creationTime[i].Before(creationTime[j])
+	})
+
+	// Pod failure detection and new pod creation are done in the same reconcile loop
+	// so the second pod is created immediately after the first pod fails.
+	// The backoff is only applied after 2nd pod failure, so we validate exponential
+	// backoff for creationTime from the 3rd pod onwards.
+	if creationTime[2].Sub(creationTime[1]).Seconds() < jobcontroller.DefaultJobBackOff.Seconds() {
+		t.Fatalf("Third pod should be created at least %v seconds after the second pod", jobcontroller.DefaultJobBackOff)
+	}
+	if creationTime[3].Sub(creationTime[2]).Seconds() < 2*jobcontroller.DefaultJobBackOff.Seconds() {
+		t.Fatalf("Fourth pod should be created at least %v seconds after the third pod", 2*jobcontroller.DefaultJobBackOff)
+	}
+}
+
 // TestJobFailedWithInterrupts tests that a job were one pod fails and the rest
 // succeed is marked as Failed, even if the controller fails in the middle.
 func TestJobFailedWithInterrupts(t *testing.T) {
@@ -1551,6 +1633,22 @@ func getJobPods(ctx context.Context, t *testing.T, clientSet clientset.Interface
 	for _, pod := range allPods.Items {
 		phase := pod.Status.Phase
 		if metav1.IsControlledBy(&pod, jobObj) && (phase == v1.PodPending || phase == v1.PodRunning) {
+			p := pod
+			jobPods = append(jobPods, &p)
+		}
+	}
+	return jobPods, nil
+}
+
+func getAllJobPods(ctx context.Context, t *testing.T, clientSet clientset.Interface, jobObj *batchv1.Job) ([]*v1.Pod, error) {
+	t.Helper()
+	allPods, err := clientSet.CoreV1().Pods(jobObj.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	jobPods := make([]*v1.Pod, 0, 0)
+	for _, pod := range allPods.Items {
+		if metav1.IsControlledBy(&pod, jobObj) {
 			p := pod
 			jobPods = append(jobPods, &p)
 		}
