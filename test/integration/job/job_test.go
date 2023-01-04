@@ -1208,7 +1208,7 @@ func TestFinalizersClearedWhenBackoffLimitExceeded(t *testing.T) {
 func TestJobPodsCreatedWithExponentialBackoff(t *testing.T) {
 	// overwrite the default value for faster testing
 	defer func() { jobcontroller.DefaultJobBackOff = 10 * time.Second }()
-	jobcontroller.DefaultJobBackOff = 2 * time.Second
+	jobcontroller.DefaultJobBackOff = 4 * time.Second
 
 	closeFn, restConfig, clientSet, ns := setup(t, "simple")
 	defer closeFn()
@@ -1266,22 +1266,35 @@ func TestJobPodsCreatedWithExponentialBackoff(t *testing.T) {
 	}
 
 	creationTime := []time.Time{}
+	finishTime := []time.Time{}
 	for _, pod := range jobPods {
 		creationTime = append(creationTime, pod.CreationTimestamp.Time)
+		if len(pod.ManagedFields) > 1 {
+			finishTime = append(finishTime, pod.ManagedFields[1].Time.Time)
+		}
 	}
 
 	sort.Slice(creationTime, func(i, j int) bool {
 		return creationTime[i].Before(creationTime[j])
 	})
 
+	sort.Slice(finishTime, func(i, j int) bool {
+		return finishTime[i].Before(finishTime[j])
+	})
+
+	fmt.Println("#########", creationTime)
+	fmt.Println("#########", finishTime)
+
 	// Pod failure detection and new pod creation are done in the same reconcile loop
 	// so the second pod is created immediately after the first pod fails.
 	// The backoff is only applied after 2nd pod failure, so we validate exponential
 	// backoff for creationTime from the 3rd pod onwards.
-	if creationTime[2].Sub(creationTime[1]).Seconds() < jobcontroller.DefaultJobBackOff.Seconds() {
+	if creationTime[2].Sub(finishTime[1]).Seconds() < jobcontroller.DefaultJobBackOff.Seconds() {
 		t.Fatalf("Third pod should be created at least %v seconds after the second pod", jobcontroller.DefaultJobBackOff)
 	}
-	if creationTime[3].Sub(creationTime[2]).Seconds() < 2*jobcontroller.DefaultJobBackOff.Seconds() {
+
+	diff := creationTime[3].Sub(finishTime[2]).Seconds()
+	if diff < 2*jobcontroller.DefaultJobBackOff.Seconds() || diff >= 4*jobcontroller.DefaultJobBackOff.Seconds() {
 		t.Fatalf("Fourth pod should be created at least %v seconds after the third pod", 2*jobcontroller.DefaultJobBackOff)
 	}
 }
