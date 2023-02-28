@@ -273,6 +273,15 @@ func (pl *PodTopologySpread) calPreFilterState(ctx context.Context, pod *v1.Pod)
 	processNode := func(i int) {
 		nodeInfo := allNodes[i]
 		node := nodeInfo.Node()
+		if len(node.Spec.Taints) > 0 {
+			for _, taint := range node.Spec.Taints {
+				if taint.Effect == v1.TaintEffectNoSchedule {
+					//check pod if it has tolerations;
+					//if not
+					return
+				}
+			}
+		}
 		if node == nil {
 			klog.ErrorS(nil, "Node not found")
 			return
